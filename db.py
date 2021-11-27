@@ -27,7 +27,6 @@ def init() -> None:
             drawn   INTEGER,
             FOREIGN KEY (creator)
                 REFERENCES users (name)
-                ON DELETE CASCADE
         )""")
 
         cur.execute("""
@@ -36,18 +35,16 @@ def init() -> None:
             to_gift    VARCHAR,
             group_name VARCHAR,
             FOREIGN KEY (member)
-                REFERENCES users (name)
-                ON DELETE CASCADE,
+                REFERENCES users (name),
             FOREIGN KEY (to_gift)
-                REFERENCES users (name)
-                ON DELETE CASCADE,
+                REFERENCES users (name),
             FOREIGN KEY (group_name)
                 REFERENCES groups (name)
-                ON DELETE CASCADE
         )""")
         con.commit()
 
 
+# ********** USER LOGIN ********** #
 def pw_hash(password: str, salt: bytes):
     return pbkdf2_hmac("sha256", password.encode() + pepper, salt, 2**16).hex()
 
@@ -84,42 +81,37 @@ def check_login(username: str, password: str) -> bool:
         return False
 
 
-def create_group(group_name: str, group_pw: str, creator: str) -> bool:
+# ********** GROUPS ********** #
+def group_exists(group_name: str) -> bool:
     with sqlite3.connect("database.db") as con:
         cur = con.cursor()
         cur.execute("SELECT * FROM groups WHERE name = (?)", (group_name, ))
         row = cur.fetchone()
         if row:
-            return False
+            return True
+    return False
 
+
+def create_group(group_name: str, group_pw: str, creator: str) -> bool:
+    if group_exists(group_name):
+        return False
+
+    with sqlite3.connect("database.db") as con:
         salt = token_bytes(32)
         hashed = pw_hash(group_pw, salt)
         hex_salt = salt.hex()
 
-        cur.execute("INSERT INTO groups VALUES (?, ?, ?)", (group_name, creator, hex_salt, hashed, 0))
-        cur.execute("INSERT INTO group_members (?, ?, ?)", (creator, "", group_name))
-        con.commit()
-        return True
-
-
-def delete_group(group_name: str, user: str) -> bool:
-    with sqlite3.connect("database.db") as con:
         cur = con.cursor()
-        cur.execute("SELECT creator FROM groups WHERE name = (?)", (group_name,))
-        row = cur.fetchone()
-        if not row:
-            return False
-
-        creator = row[0]
-        if creator != user:
-            return False
-
-        cur.execute("DELETE FROM groups WHERE name = (?)", (group_name,))
+        cur.execute("INSERT INTO groups VALUES (?, ?, ?, ?, ?)", (group_name, creator, hex_salt, hashed, 0))
+        cur.execute("INSERT INTO group_members VALUES (?, ?, ?)", (creator, "", group_name))
         con.commit()
-        return True
+    return True
 
 
 def join_group(group_name: str, group_password: str, user: str) -> bool:
+    if not group_exists(group_name):
+        return False
+
     with sqlite3.connect("database.db") as con:
         cur = con.cursor()
         cur.execute("SELECT salt, hash FROM groups WHERE name = (?)", (group_name,))
@@ -130,33 +122,49 @@ def join_group(group_name: str, group_password: str, user: str) -> bool:
         hex_salt, hashed = row
         salt = bytes.fromhex(hex_salt)
         if hashed == pw_hash(group_password, salt):
-            cur.execute("INSERT INTO group_members (?, ?)", (user, group_name))
+            cur.execute("INSERT INTO group_members VALUES (?, ?, ?)", (user, "", group_name))
             con.commit()
             return True
         return False
 
 
 def leave_group(group_name: str, user: str) -> None:
+    if not group_exists(group_name):
+        return
+
     with sqlite3.connect("database.db") as con:
         cur = con.cursor()
-        cur.execute("DELETE FROM group_members WHERE member = (?) AND name = (?)", (user, group_name))
+        cur.execute("DELETE FROM group_members WHERE member = (?) AND group_name = (?)", (user, group_name))
+
+        cur.execute("SELECT * FROM group_members WHERE group_name = (?)", (group_name,))
+        row = cur.fetchone()
+
+        # delete group if no members left
+        if not row:
+            cur.execute("DELETE FROM groups WHERE name = (?)", (group_name,))
+        # delete draws
+        else:
+            cur.execute("UPDATE groups SET drawn = 0 WHERE name = (?)", (group_name,))
+            cur.execute("UPDATE group_members SET to_gift = ''")
+
         con.commit()
 
 
 def draw_group(group_name: str, user: str) -> bool:
+    print("db draw", group_name)
+    if not group_exists(group_name):
+        return False
+
+    creator, drawn = get_creator_and_drawn(group_name)
+    if creator != user:
+        return False
+    if drawn:
+        return False
+
+    print("db draw", group_name)
+
     with sqlite3.connect("database.db") as con:
         cur = con.cursor()
-        cur.execute("SELECT creator, drawn FROM groups WHERE name = (?)", (group_name, ))
-        row = cur.fetchone()
-        if not row:
-            return False
-
-        creator, drawn = row
-        if creator != user:
-            return False
-
-        if drawn:
-            return False
 
         cur.execute("UPDATE groups SET drawn = 1 WHERE name = (?)", (group_name, ))
         users = get_group_members(group_name, user)
@@ -172,10 +180,20 @@ def draw_group(group_name: str, user: str) -> bool:
         return True
 
 
+def get_creator_and_drawn(group_name: str) -> [str, str]:
+    with sqlite3.connect("database.db") as con:
+        cur = con.cursor()
+        cur.execute("SELECT creator, drawn FROM groups WHERE name = (?)", (group_name, ))
+        row = cur.fetchone()
+        if not row:
+            return "", ""
+        return row
+
+
 def get_to_gift(group_name: str, user: str) -> str:
     with sqlite3.connect("database.db") as con:
         cur = con.cursor()
-        cur.execute("SELECT member FROM group_members WHERE group_name = (?) AND member = (?)", (group_name, user))
+        cur.execute("SELECT to_gift FROM group_members WHERE group_name = (?) AND member = (?)", (group_name, user))
         row = cur.fetchone()
         if not row:
             return ""
@@ -193,8 +211,18 @@ def get_group_members(group_name: str, user: str) -> List[str]:
         users = [row[0] for row in rows]
         if user not in users:
             return [""]
-
         return users
+
+
+def get_in_groups(user: str) -> List[str]:
+    with sqlite3.connect("database.db") as con:
+        cur = con.cursor()
+        cur.execute("SELECT group_name FROM group_members WHERE member = (?)", (user,))
+        rows = cur.fetchall()
+        if not rows:
+            return []
+        groups = [row[0] for row in rows]
+        return groups
 
 
 def clean_up() -> None:

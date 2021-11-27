@@ -12,7 +12,11 @@
     </h1>
     {% if user %}
     <p>Hi {{ user }}</p>
-    <p>You are in the following groups: {{ groups }}</p>
+    {% if groups|length > 0 %}
+    <p>You are in the following groups: {{ ", ".join(groups) }}.</p>
+    {% else %}
+    <p>Click on "Go To Groups" to join a group.</p>
+    {% endif %}
     <button onclick="document.location='/logout'">Logout</button>
     <button onclick="document.location='/groups'">Go To Groups</button>
     {% else %}
