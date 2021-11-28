@@ -10,10 +10,8 @@
             var xmlHttp = new XMLHttpRequest();
             xmlHttp.open( "GET", "/groups/"+groupName+"/draw", true );
             xmlHttp.send( null );
-            //window.location = "/groups/"+groupName;
         }
         function leaveGroup(groupName) {
-            console.log("leave group " + groupName);
             var xmlHttp = new XMLHttpRequest();
             xmlHttp.open( "DELETE", "/groups/"+groupName, true );
             xmlHttp.send( null );

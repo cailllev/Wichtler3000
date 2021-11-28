@@ -2,7 +2,7 @@ from flask import Flask, render_template, request, redirect, session
 from secrets import token_bytes
 
 from db import check_login, create_group, draw_group, join_group, get_to_gift, get_in_groups, \
-    get_creator_and_drawn, get_group_members, group_exists, leave_group, register_user
+    get_creator_and_drawn, get_group_members, group_exists, leave_group, user_in_group, register_user
 
 app = Flask(__name__)
 app.secret_key = token_bytes(16)
@@ -70,11 +70,7 @@ def group_create():
     group_name = request.form["name"]
     group_pw = request.form["password"]
     if create_group(group_name, group_pw, session[USER]):
-        return render_template(
-            "groups.html",
-            message=f"Successfully created group: {group_name}",
-            groups=in_groups.append(group_name)
-        )
+        return render_group_info(group_name, session[USER])
 
     return render_template(
         "groups.html",
@@ -114,9 +110,7 @@ def group(group_name: str):
     if USER not in session:
         return render_template("login.html", message="Please log in.")
 
-    print("in group", group_name, request.method)
     if request.method == "DELETE":
-        print("in leave group", group_name)
         leave_group(group_name, session[USER])
         in_groups = get_in_groups(session[USER])
         return render_template(
@@ -126,7 +120,7 @@ def group(group_name: str):
         )
 
     if request.method == "GET":
-        if not group_exists(group_name):
+        if not group_exists(group_name) or not user_in_group(group_name, session[USER]):
             return render_template(
                 "groups.html",
                 message=f"Group not found: {group_name}",

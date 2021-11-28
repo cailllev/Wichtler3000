@@ -109,7 +109,7 @@ def create_group(group_name: str, group_pw: str, creator: str) -> bool:
 
 
 def join_group(group_name: str, group_password: str, user: str) -> bool:
-    if not group_exists(group_name):
+    if not group_exists(group_name) or user_in_group(group_name, user):
         return False
 
     with sqlite3.connect("database.db") as con:
@@ -129,7 +129,7 @@ def join_group(group_name: str, group_password: str, user: str) -> bool:
 
 
 def leave_group(group_name: str, user: str) -> None:
-    if not group_exists(group_name):
+    if not group_exists(group_name) or not user_in_group(group_name, user):
         return
 
     with sqlite3.connect("database.db") as con:
@@ -151,7 +151,6 @@ def leave_group(group_name: str, user: str) -> None:
 
 
 def draw_group(group_name: str, user: str) -> bool:
-    print("db draw", group_name)
     if not group_exists(group_name):
         return False
 
@@ -160,8 +159,6 @@ def draw_group(group_name: str, user: str) -> bool:
         return False
     if drawn:
         return False
-
-    print("db draw", group_name)
 
     with sqlite3.connect("database.db") as con:
         cur = con.cursor()
@@ -178,6 +175,16 @@ def draw_group(group_name: str, user: str) -> bool:
 
         con.commit()
         return True
+
+
+def user_in_group(group_name: str, user: str) -> bool:
+    with sqlite3.connect("database.db") as con:
+        cur = con.cursor()
+        cur.execute("SELECT * FROM group_members WHERE group_name = (?) and member = (?)", (group_name, user))
+        row = cur.fetchone()
+        if row:
+            return True
+        return False
 
 
 def get_creator_and_drawn(group_name: str) -> [str, str]:
@@ -223,15 +230,6 @@ def get_in_groups(user: str) -> List[str]:
             return []
         groups = [row[0] for row in rows]
         return groups
-
-
-def clean_up() -> None:
-    with sqlite3.connect("database.db") as con:
-        cur = con.cursor()
-        cur.execute("DROP TABLE group_members")
-        cur.execute("DROP TABLE groups")
-        cur.execute("DROP TABLE users")
-        con.commit()
 
 
 init()
